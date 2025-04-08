@@ -62,9 +62,6 @@ int cell_built_ins(char **args)
     }
     else if (strcmp(args[0], "cd") == 0) 
     {
-        // int argc = 0;
-        // while (args[argc] != NULL) argc++;
-
         if (argc != 2) error();
         else if (chdir(args[1]) != 0) error();
         return 1;
@@ -178,7 +175,7 @@ char *cell_validate_redirect(char **args, int redirection_idx)
     return output_file;
 }
 
-
+// // built to prevent edge case where input contains redirect without any spaces e.g. "ls tests/p2a-test>/tmp/output11"
 char *normalize_redirect(char *line)
 {
     char buffer[BUFF_SIZE];
@@ -198,7 +195,9 @@ char *normalize_redirect(char *line)
         }
     }
     buffer[j] = '\0';
+    // copy and assign buffer string to line variable
     strcpy(line, buffer);
+    return line;
 };
 
 
@@ -280,16 +279,16 @@ int main(int argc, char* argv[])
     { 
         input_stream = stdin; 
     } 
-    else if (argc == 2) // batch mode
+    else if (argc == 2) // batch mode if arguments are passed
     {
         input_stream = fopen(argv[1], "r");
-        if (input_stream == NULL)
+        if (input_stream == NULL) 
         {
             error();
             exit(EXIT_FAILURE);
         }
     }
-    else // too many arguments
+    else // more than one argument passed 
     {
         error();
         exit(EXIT_FAILURE);
@@ -297,7 +296,7 @@ int main(int argc, char* argv[])
 
     while(1)
     {
-        if (input_stream == stdin)
+        if (input_stream == stdin) // if interactive mode
         {
             printf("wish> ");
         }
@@ -305,7 +304,7 @@ int main(int argc, char* argv[])
         char *line = cell_read_line(input_stream); // get full input line
         if (line == NULL) break;
 
-        normalize_redirect(line); // built to prevent 
+        line = normalize_redirect(line); // preprocess line input before splitting commands
 
         char **commands = cell_split_commands(line); // split on "&"
         Command *cmd_list[BUFF_SIZE] = {0};
@@ -331,6 +330,5 @@ int main(int argc, char* argv[])
         }
         free(line);
     }
-
     return 0;
 }
