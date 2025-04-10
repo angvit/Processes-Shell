@@ -13,14 +13,14 @@
 
 typedef struct
 {
-    char **args;
     pthread_t thread_id;
+    char **args;
 } Command;
 
 
-// the initial shell path should contain one directory "/bin"
+// initial default shell path to search for executables
 char *shell_paths[BUFF_SIZE] = {"/bin", "/usr/bin", NULL};
-int num_paths = 1;
+int num_paths = 2;
 
 
 void error()
@@ -29,7 +29,7 @@ void error()
     write(STDERR_FILENO, error_message, strlen(error_message)); 
 }
 
-
+// searches for a valid executable path by trying each shell path 
 char *cell_check_executable(char **args)
 {
     // edge case check for empty commands
@@ -45,7 +45,7 @@ char *cell_check_executable(char **args)
     return NULL;
 };
 
-
+// handles shell built-in commands
 int cell_built_ins(char **args)
 {
     int argc = 0;
@@ -53,7 +53,7 @@ int cell_built_ins(char **args)
 
     if (strcmp(args[0], "exit") == 0) 
     {
-        if (argc != 1) // throw an error and 
+        if (argc != 1) // exit takes no arguments
         {
             error();
             return 1;
@@ -62,7 +62,7 @@ int cell_built_ins(char **args)
     }
     else if (strcmp(args[0], "cd") == 0) 
     {
-        if (argc != 2) error();
+        if (argc != 2) error(); // can only give one directory
         else if (chdir(args[1]) != 0) error();
         return 1;
     }
@@ -80,7 +80,7 @@ int cell_built_ins(char **args)
         
         return 1;
     }
-    return 0;
+    return 0; // no built-in 
 }
 
 
@@ -94,11 +94,11 @@ char *cell_read_line(FILE *input_stream)
     {
         buf = NULL;
 
-        if (feof(input_stream))
+        if (feof(input_stream)) // end of input
         {
             exit(EXIT_SUCCESS);
         }
-        else 
+        else // error reading
         {
             error();
             exit(EXIT_FAILURE);
@@ -107,26 +107,23 @@ char *cell_read_line(FILE *input_stream)
     return buf;
 }
 
-
+// splits a line by '&' to support concurrent exec
 char **cell_split_commands(char *line)
 {
-    char **commands;
+    char **commands = malloc(sizeof(char *) * 128);
     char *command;
     int position = 0;
-    
-    commands = malloc(sizeof(char *) * 128);
 
     while ((command = strsep(&line, "&")) != NULL)
     {
-        // strsep replaces delimiter 
-        if (*command == '\0') continue;
+        if (*command == '\0') continue; // skip empty
         commands[position++] = command;
     }
     commands[position] = NULL;
     return commands;
 }
 
-
+// split a single command string into arguments
 char **cell_split_line(char *line)
 {
     char **tokens;
@@ -141,15 +138,16 @@ char **cell_split_line(char *line)
 
     while ((token = strsep(&line, del)) != NULL)
     {
+        // if a token is whitespace skip and don't append to tokens
         if (*token == '\0') continue;
         tokens[position++] = token;
     }
-    
+    // null terminator
     tokens[position] = NULL;
     return tokens;
 }
 
-
+// locate redirection token ">" with positional index
 int cell_search_redirect(char **args)
 {
     int redirect_idx = -1;
@@ -167,12 +165,12 @@ char *cell_validate_redirect(char **args, int redirection_idx)
 {
     if (args[redirection_idx + 1] == NULL || args[redirection_idx + 2] != NULL) 
     {
-        return NULL;
+        return NULL; // must be exactly one filename after ">"
     }
-    // cutting off args at the redirection symbol, prepping array for execv()
+    // cutting off args at the redirection symbol, prepping for execv()
     args[redirection_idx] = NULL; 
     char *output_file = args[redirection_idx + 1];
-    return output_file;
+    return output_file;// skip empty 
 }
 
 // // built to prevent edge case where input contains redirect without any spaces e.g. "ls tests/p2a-test>/tmp/output11"
@@ -201,22 +199,25 @@ char *normalize_redirect(char *line)
 };
 
 
-// pthread_create requires the thread function to take a void * argument
+// pthread-compatible function to handle execution of a single shell command
 void *cell_handle_command(void *command)
 {
-    // casting the input command safely
+    // Cast the generic void pointer to our Command struct
     Command *cmd = (Command *)command;
     char **args = cmd->args;
     char *output_file = NULL;
 
+    // if the command is empty, return immediately
     if (args[0] == NULL)
     {
-        // free(args);
         return NULL;
     }
 
+    // check if the command is a built in (exit, cd, path)
+    // If it is, execute and return 
     if (cell_built_ins(args)) return NULL;
 
+    // check if redirection is requested (search for ">")
     int redirect_idx = cell_search_redirect(args);
 
     if (redirect_idx != -1)
@@ -224,27 +225,30 @@ void *cell_handle_command(void *command)
         output_file = cell_validate_redirect(args, redirect_idx);
         if (output_file == NULL) 
         {
+            // Invalid redirection syntax (e.g. missing file name)
             error();
             return NULL;
         };
     }
     
+    // search the shell path list for an executable corresponding to the command
     char *executable_file = cell_check_executable(args);
 
+    // if executable not found, print error and return
     if (executable_file == NULL)
     {
         error();
         return NULL;
     } 
 
+    // create new child process to execute the command
     int fc = fork();
 
     if (fc == 0) // in the child process
     {
         if (output_file != NULL)
         {
-            // int fd = open(output_file, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
-            // file gets created with no permissions, need to add 0644 to read
+            // redirecting stdout and stderr to specified file
             int fd = open(output_file, O_WRONLY | O_CREAT | O_TRUNC, 0644);
             if (fd < 0)
             {
@@ -259,13 +263,15 @@ void *cell_handle_command(void *command)
         error();
         exit(EXIT_FAILURE);
 
-    } else if (fc < 0) // if fork fails 
+    } else if (fc < 0) // fork failed
     {
         error();
     } else // in the parent process
     {
         wait(NULL);
     }
+
+    // clean up the executable path string
     free(executable_file);
     return NULL;
 }
