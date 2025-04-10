@@ -83,7 +83,6 @@ int cell_built_ins(char **args)
     return 0; // no built-in 
 }
 
-
 // using for parsing from stdin in interactive mode, and from files in batch mode
 char *cell_read_line(FILE *input_stream)
 {
